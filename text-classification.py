@@ -5,11 +5,12 @@ import nltk
 from nltk.corpus import stopwords
 nltk.download('stopwords')
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, Activation
+from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras.layers import Embedding
-from tensorflow.keras.layers import LSTM, GRU
+from tensorflow.keras.layers import LSTM
 from tensorflow.keras.preprocessing import sequence
 from sklearn.model_selection import train_test_split
+from keras.callbacks import CSVLogger
 
 
 def unique_words(lines):
@@ -26,7 +27,6 @@ def unique_words(lines):
 
 def word_to_vec(posts):
     stop_words = set(stopwords.words('english'))
-    integer_arr = []
     posts = [line.lower().translate(str.maketrans('', '', string.punctuation)).split(' ') for line in posts]
     word_dict = unique_words(posts)
     word_key_map = [[word_dict[word] for word in post if word not in stop_words] for post in posts]
@@ -42,19 +42,18 @@ def main():
 
     posts = positive_posts + negative_posts
 
-    neg_one_hot = word_to_vec(negative_posts)
-    pos_one_hot = word_to_vec(positive_posts)
-
-    one_hot_arr = np.concatenate((np.zeros(len(neg_one_hot)), np.ones(len(pos_one_hot))))
-
-    X_train, X_test, y_train, y_test = train_test_split(np.concatenate((neg_one_hot, pos_one_hot)),
-                                                        one_hot_arr,
-                                                        test_size=0.33)
+    neg_encoded = word_to_vec(negative_posts)
+    pos_encoded = word_to_vec(positive_posts)
+    word_vecs = np.concatenate((neg_encoded, pos_encoded))
 
     # Padding the data samples to a maximum review length in words
     longest_post = max(len(post) for post in word_to_vec(posts))
-    X_train = sequence.pad_sequences(X_train, maxlen=longest_post)
-    X_test = sequence.pad_sequences(X_test, maxlen=longest_post)
+    padded_word_vecs = sequence.pad_sequences(word_vecs, maxlen=longest_post)
+
+    # re-create labels, concatenate with data, and set up test/train split
+    labels = np.concatenate((np.zeros(len(neg_encoded)), np.ones(len(pos_encoded))))
+    X_train, X_test, y_train, y_test = train_test_split(padded_word_vecs, labels, test_size=0.33)
+
     print('X_train shape:', X_train.shape, y_train.shape)
     print('X_test shape:', X_test.shape, y_test.shape)
 
@@ -79,7 +78,9 @@ def main():
     num_epochs = 10
     X_valid, y_valid = X_train[:batch_size], y_train[:batch_size]
     X_train2, y_train2 = X_train[batch_size:], y_train[batch_size:]
-    model.fit(X_train2, y_train2, validation_data=(X_valid, y_valid), batch_size=batch_size, epochs=num_epochs)
+    csv_logger = CSVLogger("model_history_log.csv", append=True)
+
+    model.fit(X_train2, y_train2, validation_data=(X_valid, y_valid), batch_size=batch_size, epochs=num_epochs,callbacks=[csv_logger])
     scores = model.evaluate(X_test, y_test, verbose=0)
     print('Test accuracy:', scores[1])
 
