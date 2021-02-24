@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import string
 import nltk
+from keras_preprocessing.sequence import pad_sequences
 from nltk.corpus import stopwords
 nltk.download('stopwords')
 from tensorflow.keras.models import Sequential
@@ -11,6 +12,37 @@ from tensorflow.keras.layers import LSTM
 from tensorflow.keras.preprocessing import sequence
 from sklearn.model_selection import train_test_split
 from keras.callbacks import CSVLogger
+from keras.preprocessing.text import Tokenizer
+
+
+def char_index(lines):
+    tk = Tokenizer(num_words=None, char_level=True, oov_token='UNK')
+    lines_low = [[l.lower() for l in lines]]
+    tk.fit_on_texts(lines_low)
+
+    alphabet = "abcdefghijklmnopqrstuvwxyz0123456789,;.!?:'\"/\\|_@#$%^&*~`+-=<>()[]{}"
+    char_dict = {}
+    for i, char in enumerate(alphabet):
+        char_dict[char] = i + 1
+
+    # Use char_dict to replace the tk.word_index
+    tk.word_index = char_dict.copy()
+    # Add 'UNK' to the vocabulary
+    tk.word_index[tk.oov_token] = max(char_dict.values()) + 1
+    return tk
+
+
+def embed_weights(tk):
+    vocab_size = len(tk.word_index)
+    embedding_weights = []
+    embedding_weights.append(np.zeros(vocab_size))
+
+    for char,i in tk.word_index.items():
+        onehot = np.zeros(vocab_size)
+        onehot[i-1] = 1
+        embedding_weights.append(onehot)
+
+    return np.array(embedding_weights)
 
 
 def unique_words(lines):
@@ -25,6 +57,7 @@ def unique_words(lines):
     word_keys = dict(zip(unique_words, word_vals))
     return word_keys
 
+
 def word_to_vec(posts):
     stop_words = set(stopwords.words('english'))
     posts = [line.lower().translate(str.maketrans('', '', string.punctuation)).split(' ') for line in posts]
@@ -33,17 +66,10 @@ def word_to_vec(posts):
     return word_key_map
 
 
-def main():
-    yelp_labelled = pd.read_csv('yelp_labelled.txt', sep='\t', header=None)
-    yelp_labelled.columns = ['text', 'label']
-
-    positive_posts = pd.Series.to_numpy(yelp_labelled[yelp_labelled.label == 1]['text'])
-    negative_posts = pd.Series.to_numpy(yelp_labelled[yelp_labelled.label == 0]['text'])
-
-    posts = positive_posts + negative_posts
-
-    neg_encoded = word_to_vec(negative_posts)
-    pos_encoded = word_to_vec(positive_posts)
+def word_level(p_posts,n_posts):
+    neg_encoded = word_to_vec(n_posts)
+    pos_encoded = word_to_vec(p_posts)
+    posts = n_posts+p_posts
     word_vecs = np.concatenate((neg_encoded, pos_encoded))
 
     # Padding the data samples to a maximum review length in words
@@ -83,6 +109,52 @@ def main():
     model.fit(X_train2, y_train2, validation_data=(X_valid, y_valid), batch_size=batch_size, epochs=num_epochs,callbacks=[csv_logger])
     scores = model.evaluate(X_test, y_test, verbose=0)
     print('Test accuracy:', scores[1])
+
+
+def char_level(p_posts,n_posts):
+    posts = p_posts + n_posts
+    tk = char_index(posts)
+    vocab_size = len(tk.word_index)
+    pos_seqs = tk.texts_to_sequences(p_posts)
+    pos_seq_padded = pad_sequences(pos_seqs, maxlen=1014, padding='post')  # todo: get max len automatically
+    pos_data = np.array(pos_seq_padded, dtype='float32')
+
+    neg_seqs = tk.texts_to_sequences(n_posts)
+    neg_seq_padded = pad_sequences(neg_seqs, maxlen=1014, padding='post')  # todo: get max len automatically
+    neg_data = np.array(neg_seq_padded, dtype='float32')
+
+    padded_char_vecs = np.append(neg_data, pos_data, axis = 0)
+
+    labels = np.concatenate((np.zeros(len(neg_data)), np.ones(len(pos_data))))
+    X_train, X_test, y_train, y_test = train_test_split(padded_char_vecs, labels, test_size=0.33)
+
+    print('X_train shape:', X_train.shape, y_train.shape)
+    print('X_test shape:', X_test.shape, y_test.shape)
+
+    embedding_size = 69 #TODO: find where this number comes from
+    input_size = 1014
+    em_weights = embed_weights(tk)
+    embedding_layer = Embedding(vocab_size+1,embedding_size,input_length=input_size,weights=[em_weights])
+    return embedding_layer
+
+def main():
+    yelp_labelled = pd.read_csv('yelp_labelled.txt', sep='\t', header=None)
+    yelp_labelled.columns = ['text', 'label']
+
+    positive_posts = pd.Series.to_numpy(yelp_labelled[yelp_labelled.label == 1]['text'])
+    negative_posts = pd.Series.to_numpy(yelp_labelled[yelp_labelled.label == 0]['text'])
+
+    posts = positive_posts + negative_posts
+
+    ##### WORD LEVEL NN #######
+    # word_level(positive_posts, negative_posts)
+
+    ##### CHAR LEVEL NN ########
+    char_level(positive_posts, negative_posts)
+
+
+
+
 
 
 if __name__ == "__main__":
