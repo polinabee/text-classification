@@ -4,6 +4,8 @@ import string
 import nltk
 from keras_preprocessing.sequence import pad_sequences
 from nltk.corpus import stopwords
+from tensorflow.python.keras.layers import Conv1D, MaxPooling1D, Flatten
+
 nltk.download('stopwords')
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout
@@ -15,7 +17,7 @@ from keras.callbacks import CSVLogger
 from keras.preprocessing.text import Tokenizer
 
 
-def char_index(lines):
+def char_tokenizer(lines):
     tk = Tokenizer(num_words=None, char_level=True, oov_token='UNK')
     lines_low = [[l.lower() for l in lines]]
     tk.fit_on_texts(lines_low)
@@ -113,7 +115,7 @@ def word_level(p_posts,n_posts):
 
 def char_level(p_posts,n_posts):
     posts = p_posts + n_posts
-    tk = char_index(posts)
+    tk = char_tokenizer(posts)
     vocab_size = len(tk.word_index)
     pos_seqs = tk.texts_to_sequences(p_posts)
     pos_seq_padded = pad_sequences(pos_seqs, maxlen=1014, padding='post')  # todo: get max len automatically
@@ -124,6 +126,7 @@ def char_level(p_posts,n_posts):
     neg_data = np.array(neg_seq_padded, dtype='float32')
 
     padded_char_vecs = np.append(neg_data, pos_data, axis = 0)
+    longest_post = max([len(x) for x in np.append(neg_data, pos_data, axis = 0)])
 
     labels = np.concatenate((np.zeros(len(neg_data)), np.ones(len(pos_data))))
     X_train, X_test, y_train, y_test = train_test_split(padded_char_vecs, labels, test_size=0.33)
@@ -135,7 +138,25 @@ def char_level(p_posts,n_posts):
     input_size = 1014
     em_weights = embed_weights(tk)
     embedding_layer = Embedding(vocab_size+1,embedding_size,input_length=input_size,weights=[em_weights])
-    return embedding_layer
+
+    embedding_size = 50
+    cnn_model = Sequential()
+    cnn_model.add(embedding_layer)
+    cnn_model.add(Conv1D(embedding_size, kernel_size=8, activation='relu'))
+    cnn_model.add(MaxPooling1D(pool_size=2))
+    cnn_model.add(Flatten())
+    cnn_model.add(Dense(10, activation='relu'))
+    cnn_model.add(Dense(1, activation='sigmoid'))
+    cnn_model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+    print(cnn_model.summary())
+
+    num_epochs = 20
+
+    cnn_model.fit(X_train, y_train, epochs=num_epochs, verbose=1)
+
+    scores = cnn_model.evaluate(X_test, y_test, verbose=0)
+    print('Test accuracy:', scores[1])
+
 
 def main():
     yelp_labelled = pd.read_csv('yelp_labelled.txt', sep='\t', header=None)
