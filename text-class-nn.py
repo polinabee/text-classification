@@ -118,15 +118,16 @@ def char_level(p_posts,n_posts):
     tk = char_tokenizer(posts)
     vocab_size = len(tk.word_index)
     pos_seqs = tk.texts_to_sequences(p_posts)
-    pos_seq_padded = pad_sequences(pos_seqs, maxlen=1014, padding='post')  # todo: get max len automatically
-    pos_data = np.array(pos_seq_padded, dtype='float32')
-
     neg_seqs = tk.texts_to_sequences(n_posts)
-    neg_seq_padded = pad_sequences(neg_seqs, maxlen=1014, padding='post')  # todo: get max len automatically
+    longest_post = max([len(x) for x in np.append(neg_seqs, pos_seqs, axis=0)])
+
+    pos_seq_padded = pad_sequences(pos_seqs, maxlen=longest_post, padding='post')
+    neg_seq_padded = pad_sequences(neg_seqs, maxlen=longest_post, padding='post')
+
+    pos_data = np.array(pos_seq_padded, dtype='float32')
     neg_data = np.array(neg_seq_padded, dtype='float32')
 
     padded_char_vecs = np.append(neg_data, pos_data, axis = 0)
-    longest_post = max([len(x) for x in np.append(neg_data, pos_data, axis = 0)])
 
     labels = np.concatenate((np.zeros(len(neg_data)), np.ones(len(pos_data))))
     X_train, X_test, y_train, y_test = train_test_split(padded_char_vecs, labels, test_size=0.33)
@@ -139,7 +140,6 @@ def char_level(p_posts,n_posts):
     em_weights = embed_weights(tk)
     embedding_layer = Embedding(vocab_size+1,embedding_size,input_length=input_size,weights=[em_weights])
 
-    embedding_size = 50
     cnn_model = Sequential()
     cnn_model.add(embedding_layer)
     cnn_model.add(Conv1D(embedding_size, kernel_size=8, activation='relu'))
@@ -150,12 +150,13 @@ def char_level(p_posts,n_posts):
     cnn_model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
     print(cnn_model.summary())
 
-    num_epochs = 20
+    num_epochs = 5
 
     cnn_model.fit(X_train, y_train, epochs=num_epochs, verbose=1)
 
     scores = cnn_model.evaluate(X_test, y_test, verbose=0)
     print('Test accuracy:', scores[1])
+
 
 
 def main():
